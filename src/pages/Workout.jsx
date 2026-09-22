@@ -1,400 +1,370 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import useLocalStorage from '../store/useLocalStorage.js'
-import TimerPanel from '../components/TimerPanel.jsx'
-import { unlockAudio } from '../components/sound.js'
-import exercises from '../data/exercises.js'
-import { evaluateAdaptation } from '../logic/adaptive.js'
-import { unsafeItems } from '../logic/today.js'
-import { startTimer, countDone, countSetsDone, describeItem, buildLog, logsForAdaptation } from '../logic/workout.js'
-import { toYmd, fmtDayMonth, parseYmd } from '../logic/dates.js'
-import { DAY_NAMES, PHASES, TIERS, FEEDBACK } from '../data/labels.js'
 
-const EX = Object.fromEntries(exercises.map((e) => [e.id, e]))
-
-const primaryBtn = 'rounded-xl bg-green-500 px-5 py-3 font-semibold text-white hover:bg-green-600 disabled:cursor-not-allowed disabled:bg-gray-300'
-const ghostBtn = 'rounded-xl border border-gray-300 bg-white px-5 py-3 text-gray-700 hover:bg-gray-100'
-
-const sessionTitle = (s) => `${DAY_NAMES[s.dayOfWeek - 1]} ${fmtDayMonth(parseYmd(s.date))}`
-
-function SafetyBanner() {
-  return (
-    <p className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-      Dừng ngay nếu bạn thấy đau nhói, chóng mặt, buồn nôn hoặc khó thở. Nội dung chỉ mang tính tham khảo.
-    </p>
-  )
-}
-
-function ExerciseDetails({ ex }) {
-  const steps = ex?.steps ?? []
-  const mistakes = ex?.commonMistakes ?? []
-  const notes = ex?.safetyNotes ?? []
-  return (
-    <details className="mt-2 text-sm">
-      <summary className="cursor-pointer text-gray-600">Cách thực hiện và lưu ý an toàn</summary>
-      <div className="mt-2 space-y-2 text-gray-700">
-        {steps.length ? (
-          <ol className="list-decimal space-y-1 pl-5">
-            {steps.map((s, i) => <li key={i}>{s}</li>)}
-          </ol>
-        ) : (
-          <p className="text-gray-500">Chưa có hướng dẫn chi tiết cho bài này.</p>
-        )}
-        {mistakes.length > 0 && (
-          <div>
-            <p className="font-medium">Lỗi thường gặp</p>
-            <ul className="list-disc pl-5">{mistakes.map((s, i) => <li key={i}>{s}</li>)}</ul>
-          </div>
-        )}
-        <div className="rounded-lg border border-amber-300 bg-amber-50 p-2 text-amber-900">
-          {notes.map((s, i) => <p key={i}>{s}</p>)}
-          <p>Dừng lại nếu thấy đau nhói, chóng mặt hoặc khó thở.</p>
-        </div>
-      </div>
-    </details>
-  )
-}
-
-// ---------- Màn hình chọn buổi tập ----------
-function SessionPicker({ plan, logs, todayYmd, injuries, onStart }) {
-  if (!plan) {
-    return (
-      <div className="space-y-4">
-        <h1 className="text-2xl font-bold">Buổi tập</h1>
-        <p className="text-gray-600">Bạn chưa có lịch tập. Hãy tạo lịch tuần trước.</p>
-        <Link to="/schedule" className={`${primaryBtn} inline-block`}>Đến Lịch tuần</Link>
-      </div>
-    )
-  }
-  const todo = plan.sessions
-    .filter((s) => !logs.some((l) => l.sessionDate === s.date))
-    .sort((a, b) => a.date.localeCompare(b.date))
-  const today = todo.find((s) => s.date === todayYmd)
-  const others = todo.filter((s) => s !== today)
-
-  // An toàn: hồ sơ có thể đã đổi (thêm chấn thương) SAU khi lịch này được tạo.
-  // Buổi có bài không còn phù hợp thì không cho bắt đầu, chỉ cho tạo lại lịch.
-  const card = (s, highlight) => {
-    const bad = unsafeItems(s, injuries, exercises)
-    return (
-      <li key={s.date} className={`rounded-2xl border p-4 ${highlight ? 'border-green-500 bg-green-50' : 'border-gray-200 bg-white'}`}>
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="font-bold">{sessionTitle(s)}{s.date < todayYmd ? ' (đã qua, tập bù được)' : ''}</p>
-            <p className="text-sm text-gray-600">{s.startTime} · {s.minutes} phút · {TIERS[s.session.tier]}</p>
-          </div>
-          {bad.length === 0 && (
-            <button type="button" onClick={() => onStart(s)} className={primaryBtn}>Bắt đầu</button>
-          )}
-        </div>
-        {bad.length > 0 && (
-          <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-            <p className="font-semibold">Hồ sơ của bạn đã thay đổi, buổi này cần được cập nhật.</p>
-            <p className="mt-1">Có bài không còn phù hợp: {bad.join(', ')}.</p>
-            <Link to="/schedule" className="mt-2 inline-block font-semibold underline">Tạo lại lịch</Link>
-          </div>
-        )}
-      </li>
-    )
-  }
-
-  return (
-    <div className="space-y-5">
-      <h1 className="text-2xl font-bold">Buổi tập</h1>
-      {today ? (
-        <section className="space-y-2">
-          <h2 className="text-sm font-semibold text-gray-500">Hôm nay</h2>
-          <ul>{card(today, true)}</ul>
-        </section>
-      ) : (
-        todo.length > 0 && <p className="text-gray-600">Hôm nay bạn không có buổi tập trong lịch.</p>
-      )}
-      {others.length > 0 && (
-        <section className="space-y-2">
-          <h2 className="text-sm font-semibold text-gray-500">Các buổi khác trong lịch</h2>
-          <ul className="space-y-2">{others.map((s) => card(s, false))}</ul>
-        </section>
-      )}
-      {todo.length === 0 && (
-        <p className="rounded-xl bg-green-50 p-4 text-green-800">Bạn đã hoàn thành hết các buổi trong lịch này. Tuyệt vời!</p>
-      )}
-      <Link to="/schedule" className="inline-block text-sm text-green-700 underline">Xem lịch tuần</Link>
-    </div>
-  )
-}
-
-// ---------- Màn hình kết quả sau khi lưu ----------
-function DoneScreen({ result, onAnother }) {
-  const { log, adaptation } = result
-  const verdict = adaptation.delta > 0
-    ? 'Buổi sau sẽ tăng nhẹ độ khó'
-    : adaptation.delta < 0
-      ? 'Buổi sau sẽ giảm nhẹ độ khó'
-      : 'Giữ nguyên mức tập hiện tại'
-  return (
-    <div className="space-y-5">
-      <div className="rounded-2xl bg-green-500 p-5 text-white">
-        <p className="text-2xl font-bold">Hoàn thành buổi tập!</p>
-        <p className="mt-1">
-          {log.completedCount}/{log.total} bài · {log.actualMinutes} phút
-        </p>
-      </div>
-      <div className="rounded-2xl border border-gray-200 bg-white p-4">
-        <p className="font-semibold">{verdict}</p>
-        <p className="mt-1 text-sm text-gray-600">{adaptation.reason}</p>
-        {adaptation.decision === 'hold' && adaptation.average === null && (
-          <p className="mt-1 text-sm text-gray-500">Hệ thống cần thêm vài buổi phản hồi để điều chỉnh chính xác hơn.</p>
-        )}
-        {adaptation.delta !== 0 && (
-          <p className="mt-2 text-sm text-gray-600">
-            Vào <b>Lịch tuần</b> và bấm &quot;Tạo lại lịch&quot; để áp dụng mức tải mới.
-          </p>
-        )}
-      </div>
-      <div className="flex flex-wrap gap-3">
-        <Link to="/schedule" className={`${primaryBtn} inline-block`}>Về lịch tuần</Link>
-        <button type="button" onClick={onAnother} className={ghostBtn}>Tập buổi khác</button>
-      </div>
-    </div>
-  )
-}
-
-// ---------- Trang chính ----------
 export default function Workout() {
-  const [profile] = useLocalStorage('profile', null)
-  const [plan] = useLocalStorage('weekPlan', null)
-  const [logs, setLogs] = useLocalStorage('logs', [])
-  const [adapt, setAdapt] = useLocalStorage('adaptState', { step: 0, lastAdjustedLogId: null })
-  const [active, setActive] = useLocalStorage('activeWorkout', null) // buổi đang tập dở (giữ lại khi tải lại trang)
-  const [soundOn, setSoundOn] = useLocalStorage('soundOn', true)
-  const [timer, setTimer] = useState(null)
-  const [stage, setStage] = useState('work') // 'work' | 'feedback' | 'done'
-  const [feedback, setFeedback] = useState('')
-  const [note, setNote] = useState('')
-  const [result, setResult] = useState(null)
+  // Logic 1: Quản lý chuyển đổi giữa Tuần này và Tuần sau
+  const [activeWeekTab, setActiveWeekTab] = useState('thisWeek')
 
-  const todayYmd = toYmd(new Date())
+  // Logic 2: Danh sách lịch tập luyện trong tuần (có chức năng Bắt đầu / Đánh dấu hoàn thành)
+  const [workouts, setWorkouts] = useState([
+    {
+      id: 1,
+      dayKey: 'T2',
+      date: '21/09',
+      title: 'Tập thể dục',
+      time: '06:00 - 07:00',
+      duration: '30 phút',
+      category: 'Cardio nhẹ',
+      iconType: 'run',
+      completed: true,
+    },
+    {
+      id: 2,
+      dayKey: 'T4',
+      date: '23/09',
+      title: 'Tập gym',
+      time: '18:00 - 19:00',
+      duration: '45 phút',
+      category: 'Toàn thân',
+      iconType: 'gym',
+      completed: false,
+    },
+    {
+      id: 3,
+      dayKey: 'T6',
+      date: '25/09',
+      title: 'Yoga',
+      time: '06:30 - 07:30',
+      duration: '60 phút',
+      category: 'Thư giãn',
+      iconType: 'yoga',
+      completed: false,
+    },
+    {
+      id: 4,
+      dayKey: 'CN',
+      date: '27/09',
+      title: 'Chạy bộ',
+      time: '05:30 - 06:30',
+      duration: '60 phút',
+      category: 'Cardio',
+      iconType: 'run',
+      completed: false,
+    },
+  ])
 
-  if (stage === 'done' && result) {
-    return <DoneScreen result={result} onAnother={() => { setStage('work'); setResult(null) }} />
+  // Tính số buổi đã hoàn thành
+  const completedCount = workouts.filter((w) => w.completed).length
+  const totalCount = 5 // Target 5 buổi/tuần
+
+  // Hàm chuyển đổi trạng thái hoàn thành bài tập
+  const toggleWorkoutStatus = (id) => {
+    setWorkouts((prev) =>
+      prev.map((item) =>
+        item.id === id ? { ...item, completed: !item.completed } : item
+      )
+    )
   }
 
-  function startSession(s) {
-    // Lưu bản sao của buổi tập: dù sau đó bạn tạo lại lịch, buổi đang tập vẫn giữ nguyên
-    setActive({ date: s.date, startedAt: Date.now(), session: s, progress: {} })
-    setTimer(null)
-    setStage('work')
-    setFeedback('')
-    setNote('')
-  }
-
-  if (!active) {
-    return <SessionPicker plan={plan} logs={logs} todayYmd={todayYmd} injuries={profile?.injuries} onStart={startSession} />
-  }
-
-  const s = active.session
-  const items = s.session.items
-  const progress = active.progress
-  const doneCount = countDone(items, progress)
-  const setsDone = countSetsDone(progress)
-  const percent = items.length ? Math.round((doneCount / items.length) * 100) : 0
-
-  const setSets = (id, n) => setActive({ ...active, progress: { ...progress, [id]: n } })
-
-  function startRest(item, doneSets) {
-    setTimer(startTimer(Date.now(), item.restSec, {
-      kind: 'rest',
-      exerciseId: item.exerciseId,
-      label: `Nghỉ sau hiệp ${doneSets}/${item.sets}: ${item.name}`,
-    }))
-  }
-
-  function completeSet(item) {
-    const done = progress[item.exerciseId] ?? 0
-    if (done >= item.sets) return
-    unlockAudio()
-    setSets(item.exerciseId, done + 1)
-    if (done + 1 < item.sets) startRest(item, done + 1)
-    else setTimer(null)
-  }
-
-  function startWork(item) {
-    const done = progress[item.exerciseId] ?? 0
-    unlockAudio()
-    setTimer(startTimer(Date.now(), item.durationSec, {
-      kind: 'work',
-      exerciseId: item.exerciseId,
-      label: `${item.name}: hiệp ${done + 1}/${item.sets}`,
-    }))
-  }
-
-  function toggleItem(item) {
-    const isDone = (progress[item.exerciseId] ?? 0) >= item.sets
-    setSets(item.exerciseId, isDone ? 0 : item.sets)
-    if (timer && timer.exerciseId === item.exerciseId) setTimer(null)
-  }
-
-  // Hết giờ đếm ngược tập → tự tính là xong hiệp đó và chuyển sang nghỉ
-  function handleTimerEnd(t) {
-    if (t.kind !== 'work') return
-    const item = items.find((i) => i.exerciseId === t.exerciseId)
-    if (item) completeSet(item)
-  }
-
-  function skipTimer(t) {
-    if (t.kind === 'work') handleTimerEnd(t)
-    else setTimer(null)
-  }
-
-  function cancelWorkout() {
-    if (window.confirm('Huỷ buổi tập đang làm dở? Tiến độ sẽ không được lưu.')) {
-      setActive(null)
-      setTimer(null)
+  // Render SVG Icon tương ứng
+  const renderWorkoutIcon = (type) => {
+    switch (type) {
+      case 'gym':
+        return (
+          <svg className="h-5 w-5 text-emerald-800" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 6h2m14 0h2M5 6v12m14-12v12M7 10h10M7 14h10" />
+          </svg>
+        )
+      case 'yoga':
+        return (
+          <svg className="h-5 w-5 text-emerald-800" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4a2 2 0 100-4 2 2 0 000 4zM12 22s8-4 8-10A8 8 0 004 12c0 6 8 10 8 10z" />
+          </svg>
+        )
+      default:
+        return (
+          <svg className="h-5 w-5 text-emerald-800" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+        )
     }
   }
 
-  function saveWorkout() {
-    const nowMs = Date.now()
-    const log = buildLog({ session: s, progress, feedback, note, startedAtMs: active.startedAt, nowMs })
-    const newLogs = [...logs, log]
-    const adaptation = evaluateAdaptation(logsForAdaptation(newLogs), adapt)
-    setLogs(newLogs)
-    setAdapt(adaptation.state)
-    setActive(null)
-    setTimer(null)
-    setResult({ log, adaptation })
-    setStage('done')
-  }
-
-  // ---------- Bước chấm điểm cảm nhận ----------
-  if (stage === 'feedback') {
-    return (
-      <div className="mx-auto max-w-lg space-y-5">
-        <h1 className="text-2xl font-bold">Buổi tập vừa rồi thế nào?</h1>
-        <p className="text-sm text-gray-600">Bạn xong {doneCount}/{items.length} bài. Đánh giá thật lòng để hệ thống chọn mức tập phù hợp cho bạn.</p>
-        <div className="grid gap-2">
-          {FEEDBACK.map((f) => (
-            <button
-              key={f.value}
-              type="button"
-              aria-pressed={feedback === f.value}
-              onClick={() => setFeedback(f.value)}
-              className={`rounded-xl border px-4 py-3 text-left ${feedback === f.value ? 'border-green-500 bg-green-50 font-semibold text-green-700' : 'border-gray-200 bg-white'}`}
-            >
-              <span className="block">{f.label}</span>
-              <span className="block text-xs font-normal text-gray-500">{f.desc}</span>
-            </button>
-          ))}
-        </div>
-        <div>
-          <label htmlFor="note" className="mb-1 block text-sm font-medium text-gray-700">Ghi chú (không bắt buộc)</label>
-          <textarea
-            id="note"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            rows={3}
-            placeholder="VD: hơi mỏi vai, tập xong thấy khoẻ"
-            className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-200"
-          />
-        </div>
-        <div className="flex gap-3">
-          <button type="button" onClick={() => setStage('work')} className={ghostBtn}>Quay lại</button>
-          <button type="button" onClick={saveWorkout} disabled={!feedback} className={`${primaryBtn} flex-1`}>Lưu buổi tập</button>
-        </div>
-      </div>
-    )
-  }
-
-  // ---------- Đang tập ----------
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-bold">Buổi tập</h1>
-        <p className="text-sm text-gray-600">
-          {sessionTitle(s)} · {s.minutes} phút · {TIERS[s.session.tier]}
-        </p>
+    <div className="relative space-y-6">
+      {/* Trang trí họa tiết chùm lá góc trên bên phải */}
+      <div className="pointer-events-none absolute -right-8 -top-8 z-0 opacity-80">
+        <svg className="h-36 w-36 text-emerald-300/40" viewBox="0 0 100 100" fill="currentColor">
+          <path d="M50 0C50 0 55 25 75 35C95 45 100 70 100 70C100 70 75 65 65 45C55 25 50 0 50 0Z" />
+          <path d="M30 20C30 20 40 40 60 50C80 60 85 85 85 85C85 85 60 75 50 55C40 35 30 20 30 20Z" />
+        </svg>
       </div>
 
-      <SafetyBanner />
+      {/* Banner Top Header Tập Luyện */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-[#e6f4ea] via-[#f0f8f3] to-emerald-100 p-6 shadow-sm">
+        <div className="relative z-10 flex flex-col justify-between gap-4 md:flex-row md:items-center">
+          <div className="space-y-3 max-w-xl">
+            <div className="flex items-center gap-3">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#133e29] text-white shadow-sm">
+                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold text-gray-900">Tập luyện mỗi ngày</h1>
+                <p className="text-xs text-gray-600">Khỏe hơn, dẻo dai hơn, phiên bản tốt hơn của bạn!</p>
+              </div>
+            </div>
 
-      <TimerPanel timer={timer} soundOn={soundOn} onChange={setTimer} onFinish={handleTimerEnd} onSkip={skipTimer} />
+            {/* 3 Thẻ đặc điểm */}
+            <div className="flex flex-wrap gap-2 pt-1">
+              <div className="inline-flex items-center gap-1.5 rounded-full bg-white/80 px-3 py-1 text-[11px] font-medium text-emerald-900 shadow-2xs backdrop-blur-sm">
+                <span>💚</span> Cải thiện sức khỏe tim mạch
+              </div>
+              <div className="inline-flex items-center gap-1.5 rounded-full bg-white/80 px-3 py-1 text-[11px] font-medium text-emerald-900 shadow-2xs backdrop-blur-sm">
+                <span>⚡</span> Tăng cường sức bền
+              </div>
+              <div className="inline-flex items-center gap-1.5 rounded-full bg-white/80 px-3 py-1 text-[11px] font-medium text-emerald-900 shadow-2xs backdrop-blur-sm">
+                <span>💪</span> Nâng cao sức mạnh cơ bắp
+              </div>
+            </div>
+          </div>
 
-      <div>
-        <div className="mb-1 flex justify-between text-sm text-gray-600">
-          <span>Tiến độ</span>
-          <span>{doneCount}/{items.length} bài</span>
-        </div>
-        <div className="h-3 rounded-full bg-gray-200">
-          <div className="h-3 rounded-full bg-green-500 transition-all" style={{ width: `${percent}%` }} role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100} />
+          {/* Góc phải Banner: Text nghệ thuật & Ảnh minh họa */}
+          <div className="relative flex items-center justify-end">
+            <span className="hidden lg:block text-lg font-serif italic text-[#133e29] font-semibold pr-4">
+              Vận động là yêu thương bản thân ❤️
+            </span>
+            <div className="h-28 w-28 shrink-0">
+              <img
+                src="/yoga-woman.png"
+                alt="Stretch"
+                className="h-full w-full object-contain"
+                onError={(e) => {
+                  e.target.onerror = null
+                  e.target.src = 'https://illustrations.pouch.cool/pack/fitness/1.png'
+                }}
+              />
+            </div>
+          </div>
         </div>
       </div>
 
-      <label className="flex items-center gap-2 text-sm text-gray-600">
-        <input type="checkbox" checked={soundOn} onChange={(e) => setSoundOn(e.target.checked)} />
-        Âm báo khi hết giờ
-      </label>
+      {/* Bố cục Main 2 Cột */}
+      <div className="relative z-10 grid grid-cols-1 gap-6 lg:grid-cols-3">
+        {/* Cột Trái: Danh Sách Lịch Tập (Chiếm 2 cột) */}
+        <div className="space-y-4 lg:col-span-2">
+          {/* Header nhóm & Xem chi tiết */}
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-bold text-gray-900">Lịch tập của bạn</h2>
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-gray-500">🎯 Mục tiêu tuần này: <strong>{completedCount}/{totalCount} buổi</strong></span>
+              <Link to="/schedule" className="font-semibold text-[#2d9354] hover:underline">
+                Xem chi tiết →
+              </Link>
+            </div>
+          </div>
 
-      {PHASES.map(([phase, title]) => {
-        const list = items.filter((i) => i.phase === phase)
-        if (!list.length) return null
-        return (
-          <section key={phase} className="space-y-2">
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-400">{title}</h2>
-            <ol className="space-y-2">
-              {list.map((item) => {
-                const ex = EX[item.exerciseId]
-                const done = progress[item.exerciseId] ?? 0
-                const finished = done >= item.sets
-                const running = timer && timer.kind === 'work' && timer.exerciseId === item.exerciseId
-                return (
-                  <li key={item.exerciseId} className={`rounded-2xl border p-4 ${finished ? 'border-green-300 bg-green-50' : 'border-gray-200 bg-white'}`}>
-                    <div className="flex items-start gap-3">
-                      <input
-                        type="checkbox"
-                        checked={finished}
-                        onChange={() => toggleItem(item)}
-                        aria-label={`Hoàn thành ${item.name}`}
-                        className="mt-1 h-5 w-5 accent-green-500"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <p className={`font-semibold ${finished ? 'text-green-700 line-through' : ''}`}>{item.name}</p>
-                        <p className="text-sm text-gray-500">{describeItem(item)}</p>
-                        <p className="text-xs text-gray-500">Hiệp {done}/{item.sets}</p>
-                        {!finished && (
-                          item.durationSec != null ? (
-                            <button type="button" disabled={running} onClick={() => startWork(item)} className="mt-2 rounded-lg bg-green-500 px-3 py-2 text-sm font-semibold text-white hover:bg-green-600 disabled:bg-gray-300">
-                              Bắt đầu hiệp {done + 1} ({item.durationSec} giây)
-                            </button>
-                          ) : (
-                            <button type="button" onClick={() => completeSet(item)} className="mt-2 rounded-lg bg-green-500 px-3 py-2 text-sm font-semibold text-white hover:bg-green-600">
-                              Xong hiệp {done + 1}
-                            </button>
-                          )
-                        )}
-                        <ExerciseDetails ex={ex} />
-                      </div>
-                      {ex?.image ? (
-                        <img src={ex.image} alt="" loading="lazy" className="h-16 w-16 rounded-lg object-cover" />
-                      ) : (
-                        <div aria-hidden="true" className="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-2xl font-bold text-gray-300">
-                          {item.name[0]}
-                        </div>
-                      )}
-                    </div>
-                  </li>
-                )
-              })}
-            </ol>
-          </section>
-        )
-      })}
+          {/* Thanh chọn Tuần */}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2 rounded-2xl border border-gray-100 bg-white px-3 py-2 text-xs font-semibold text-gray-700 shadow-sm">
+              <button className="text-gray-400 hover:text-gray-700">‹</button>
+              <div className="flex items-center gap-1.5">
+                <svg className="h-4 w-4 text-[#133e29]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+                <span>
+                  {activeWeekTab === 'thisWeek'
+                    ? 'Tuần này (21/09 – 27/09)'
+                    : 'Tuần sau (28/09 – 04/10)'}
+                </span>
+              </div>
+              <button className="text-gray-400 hover:text-gray-700">›</button>
+            </div>
 
-      <div className="flex flex-wrap items-center gap-3 pt-2">
-        <button type="button" onClick={() => setStage('feedback')} disabled={setsDone === 0} className={primaryBtn}>
-          Kết thúc buổi tập
-        </button>
-        <button type="button" onClick={cancelWorkout} className={ghostBtn}>Huỷ buổi tập</button>
-        {setsDone === 0 && <span className="text-sm text-gray-500">Hãy hoàn thành ít nhất một hiệp để kết thúc.</span>}
+            <div className="flex rounded-2xl bg-gray-100/80 p-1 text-xs font-semibold">
+              <button
+                onClick={() => setActiveWeekTab('thisWeek')}
+                className={`rounded-xl px-4 py-1.5 transition-all ${
+                  activeWeekTab === 'thisWeek'
+                    ? 'bg-[#133e29] text-white shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                Tuần này
+              </button>
+              <button
+                onClick={() => setActiveWeekTab('nextWeek')}
+                className={`rounded-xl px-4 py-1.5 transition-all ${
+                  activeWeekTab === 'nextWeek'
+                    ? 'bg-[#133e29] text-white shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                Tuần sau
+              </button>
+            </div>
+          </div>
+
+          {/* Danh sách các buổi tập trong tuần */}
+          <div className="space-y-3">
+            {workouts.map((item) => (
+              <div
+                key={item.id}
+                className="flex items-center justify-between rounded-3xl border border-gray-100 bg-white p-4 shadow-sm transition-all hover:border-emerald-100"
+              >
+                <div className="flex items-center gap-4">
+                  {/* Ô Ngày tháng */}
+                  <div
+                    className={`flex h-12 w-12 flex-col items-center justify-center rounded-2xl text-xs font-bold transition-all ${
+                      item.completed
+                        ? 'bg-[#2d9354] text-white'
+                        : 'bg-[#f0f8f3] text-gray-700'
+                    }`}
+                  >
+                    <span>{item.dayKey}</span>
+                    <span className="text-[10px] opacity-80">{item.date}</span>
+                    {item.completed && <span className="text-[9px]">✓</span>}
+                  </div>
+
+                  {/* Icon loại bài tập */}
+                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#f0f8f3]">
+                    {renderWorkoutIcon(item.iconType)}
+                  </div>
+
+                  {/* Thông tin bài tập */}
+                  <div>
+                    <h3 className="text-sm font-bold text-gray-800">{item.title}</h3>
+                    <p className="text-[11px] text-gray-400 mt-0.5">
+                      {item.time} • {item.duration} • {item.category}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Nút Hành Động */}
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => toggleWorkoutStatus(item.id)}
+                    className={`inline-flex items-center gap-1 rounded-2xl px-4 py-2 text-xs font-semibold transition-all ${
+                      item.completed
+                        ? 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                        : 'bg-[#133e29] text-white hover:bg-emerald-900 shadow-sm'
+                    }`}
+                  >
+                    {item.completed ? 'Đã hoàn thành' : 'Bắt đầu'}
+                    <span className="text-xs">›</span>
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Link sang trang lịch tuần */}
+          <div className="pt-2">
+            <Link
+              to="/schedule"
+              className="inline-flex items-center gap-2 text-xs font-bold text-gray-600 hover:text-[#133e29]"
+            >
+              <span>📅 Xem lịch tuần →</span>
+            </Link>
+          </div>
+        </div>
+
+        {/* Cột Phải: Tiến Độ + Bài Tập Gợi Ý + Quote (Chiếm 1 cột) */}
+        <div className="space-y-5">
+          {/* Card Tiến độ tập luyện */}
+          <div className="rounded-3xl border border-gray-100 bg-white p-6 shadow-sm space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-xs font-bold text-gray-800">
+                <svg className="h-4 w-4 text-[#133e29]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                </svg>
+                <span>Tiến độ tập luyện</span>
+              </div>
+              <span className="text-xs font-bold text-gray-500">
+                {completedCount}/{totalCount} buổi
+              </span>
+            </div>
+
+            {/* Thanh Progress */}
+            <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100">
+              <div
+                className="h-full rounded-full bg-[#2d9354] transition-all duration-500"
+                style={{ width: `${(completedCount / totalCount) * 100}%` }}
+              ></div>
+            </div>
+
+            {/* Tip box */}
+            <div className="rounded-2xl bg-[#f0f8f3] p-3 text-[11px] text-emerald-900 leading-relaxed font-medium">
+              💡 <strong>Bạn đang làm rất tốt!</strong> Cố gắng hoàn thành {totalCount - completedCount} buổi còn lại trong tuần này nhé!
+            </div>
+          </div>
+
+          {/* Card Bài Tập Gợi Ý Hôm Nay */}
+          <div className="rounded-3xl border border-gray-100 bg-white p-5 shadow-sm space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-xs font-bold text-gray-800">
+                <span className="text-emerald-700">🏋️</span> Bài tập gợi ý hôm nay
+              </div>
+              <span className="text-gray-400 text-xs">›</span>
+            </div>
+
+            {/* Khung minh họa Plank */}
+            <div className="flex items-center gap-3 rounded-2xl bg-[#f0f8f3] p-3">
+              <div className="h-16 w-24 shrink-0 overflow-hidden rounded-xl bg-white p-1">
+                <img
+                  src="/plank-exercise.png"
+                  alt="Plank"
+                  className="h-full w-full object-contain"
+                  onError={(e) => {
+                    e.target.onerror = null
+                    e.target.src = 'https://illustrations.pouch.cool/pack/fitness/2.png'
+                  }}
+                />
+              </div>
+              <div>
+                <h4 className="text-xs font-bold text-gray-800">Plank cơ bản</h4>
+                <p className="text-[10px] text-gray-500 mt-1">⏱ 3 hiệp • ⏱ 30 giây</p>
+              </div>
+            </div>
+
+            <button className="w-full rounded-2xl bg-[#133e29] py-2.5 text-center text-xs font-semibold text-white shadow transition-all hover:bg-emerald-900">
+              Xem chi tiết ›
+            </button>
+          </div>
+
+          {/* Banner Động Lực "Tập Luyện Đúng Cách" */}
+          <div className="relative min-h-[140px] overflow-hidden rounded-3xl bg-gradient-to-br from-[#e6f4ea] via-[#f0f8f3] to-emerald-100 p-5 shadow-sm">
+            <div className="relative z-10 max-w-[170px] space-y-1">
+              <span className="text-base font-serif italic text-[#133e29] font-bold block leading-snug">
+                Tập luyện đúng cách = Kết quả rõ rệt!
+              </span>
+            </div>
+
+            {/* Minh họa dụng cụ tập gym */}
+            <div className="absolute -bottom-2 -right-2 z-0 h-32 w-32 opacity-90">
+              <img
+                src="/gym-equipments.png"
+                alt="Equipments"
+                className="h-full w-full object-contain"
+                onError={(e) => {
+                  e.target.onerror = null
+                  e.target.src = 'https://illustrations.pouch.cool/pack/fitness/5.png'
+                }}
+              />
+            </div>
+          </div>
+
+          {/* Box Quote Truyền Cảm Hứng */}
+          <div className="rounded-3xl border border-gray-100 bg-white p-5 shadow-sm space-y-2">
+            <div className="flex items-center gap-1 text-xs text-emerald-700">
+              <span>🍃</span>
+            </div>
+            <p className="text-xs text-gray-600 italic leading-relaxed">
+              "Không có giới hạn nào cho những gì bạn có thể đạt được khi bạn chăm sóc sức khỏe của mình."
+            </p>
+          </div>
+        </div>
       </div>
     </div>
   )
