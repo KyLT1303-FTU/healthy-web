@@ -1,19 +1,9 @@
-import { useState } from 'react'
-import { Link } from 'react-router-dom'
-import useLocalStorage from '../store/useLocalStorage.js'
-import { WeightChart, WeeklyChart } from '../components/Charts.jsx'
-import {
-  computeStreaks, weeklySeries, upsertWeight, removeWeight, validateWeight, weightChange, isQualifying,
-} from '../logic/progress.js'
-import { evaluateBadges } from '../logic/badges.js'
 import { toYmd, parseYmd, fmtDayMonth } from '../logic/dates.js'
+import { DAY_NAMES, FEEDBACK as FEEDBACK_LIST } from '../data/labels.js'
 
-const DAY_NAMES = ['Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7', 'Chủ nhật']
-const FEEDBACK = {
-  too_easy: ['Quá dễ', 'bg-sky-100 text-sky-700'],
-  just_right: ['Vừa sức', 'bg-green-100 text-green-700'],
-  too_hard: ['Quá khó', 'bg-orange-100 text-orange-700'],
-}
+const FEEDBACK = Object.fromEntries(
+  FEEDBACK_LIST.map((f, i) => [f.value, [f.label, ['bg-sky-100 text-sky-700', 'bg-green-100 text-green-700', 'bg-orange-100 text-orange-700'][i]]]),
+)
 const dayLabel = (ymd) => {
   const d = parseYmd(ymd)
   return `${DAY_NAMES[(d.getDay() + 6) % 7]} · ${fmtDayMonth(d)}`

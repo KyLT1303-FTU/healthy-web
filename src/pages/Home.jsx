@@ -1,12 +1,10 @@
 import { Link, useNavigate } from 'react-router-dom'
 import useLocalStorage from '../store/useLocalStorage.js'
-import exercises from '../data/exercises.sample.json'
+import exercises from '../data/exercises.js'
 import { getTodayState, unsafeItems } from '../logic/today.js'
 import { computeStreaks } from '../logic/progress.js'
 import { toYmd, parseYmd, fmtDayMonth } from '../logic/dates.js'
-
-const DAY_NAMES = ['Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7', 'Chủ nhật']
-const TIERS = { mini: 'Buổi ngắn', short: 'Buổi vừa', full: 'Buổi đầy đủ' }
+import { DAY_NAMES, TIERS } from '../data/labels.js'
 
 const card = 'rounded-2xl border border-gray-200 bg-white p-5'
 const primaryBtn = 'inline-block rounded-xl bg-green-500 px-5 py-3 text-center font-semibold text-white hover:bg-green-600'

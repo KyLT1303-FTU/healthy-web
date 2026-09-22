@@ -1,10 +1,5 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
-import useLocalStorage from '../store/useLocalStorage.js'
-import { findFreeSlotsByDay, minToTime, timeToMin } from '../logic/freeSlots.js'
-import { DAY_START_MIN } from '../logic/constants.js'
 import { ROWS, CELL_MIN, cellsToSlots, slotsToCells } from '../logic/busyCells.js'
-
-const DAY_NAMES = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN']
+import { DAY_NAMES_SHORT as DAY_NAMES } from '../data/labels.js'
 
 const rowOf = (hhmm) => (timeToMin(hhmm) - DAY_START_MIN) / CELL_MIN
 const rowTime = (r) => minToTime(DAY_START_MIN + r * CELL_MIN)

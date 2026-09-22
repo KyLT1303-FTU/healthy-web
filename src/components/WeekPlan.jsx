@@ -1,21 +1,11 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import useLocalStorage from '../store/useLocalStorage.js'
-import exercises from '../data/exercises.sample.json'
+import exercises from '../data/exercises.js'
 import { scheduleWeek } from '../logic/scheduler.js'
 import { mondayOf, addDays, toYmd, parseYmd, fmtDayMonth } from '../logic/dates.js'
+import { DAY_NAMES, PHASES, TIERS, INJURY_LABELS } from '../data/labels.js'
 
-const DAY_NAMES = ['Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7', 'Chủ nhật']
-const PHASES = [
-  ['warmup', 'Khởi động'],
-  ['main', 'Tập chính'],
-  ['cooldown', 'Thả lỏng'],
-]
-const TIERS = { mini: 'Buổi ngắn', short: 'Buổi vừa', full: 'Buổi đầy đủ' }
-const INJURY_LABELS = {
-  lower_back: 'Đau lưng dưới', knee: 'Đau gối', shoulder: 'Đau vai',
-  wrist: 'Đau cổ tay', ankle: 'Đau cổ chân', neck: 'Đau cổ',
-}
 const NAME = Object.fromEntries(exercises.map((e) => [e.id, e.name]))
 
 function describeItem(i) {

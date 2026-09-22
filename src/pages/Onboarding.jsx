@@ -1,37 +1,12 @@
 import { useState } from 'react'
 import useLocalStorage from '../store/useLocalStorage.js'
 import { calcBMI, bmiCategory } from '../logic/profile.js'
+import { GOALS, LEVELS, INJURIES, EQUIPMENT, PERIODS, labelOf } from '../data/labels.js'
 
-// ---------- Các lựa chọn (muốn thêm/bớt thì sửa ở đây) ----------
+// ---------- Các lựa chọn riêng của trang này ----------
 const STEPS = ['Thể trạng', 'Mục tiêu', 'Chấn thương', 'Sức khoẻ', 'Lịch tập']
-
-const GOALS = [
-  { value: 'weight_loss', label: 'Giảm cân', desc: 'Đốt năng lượng, giảm mỡ' },
-  { value: 'muscle_gain', label: 'Tăng cơ', desc: 'Tập sức mạnh, săn chắc cơ thể' },
-  { value: 'flexibility', label: 'Giãn cơ', desc: 'Dẻo dai, giảm cứng cơ' },
-]
-const LEVELS = [
-  { value: 'beginner', label: 'Mới bắt đầu', desc: 'Ít hoặc chưa từng tập đều đặn' },
-  { value: 'intermediate', label: 'Trung bình', desc: 'Đã tập đều được vài tháng' },
-  { value: 'advanced', label: 'Nâng cao', desc: 'Tập đều đặn hơn 1 năm' },
-]
-const INJURIES = [
-  { value: 'lower_back', label: 'Đau lưng dưới' },
-  { value: 'knee', label: 'Đau gối' },
-  { value: 'shoulder', label: 'Đau vai' },
-  { value: 'wrist', label: 'Đau cổ tay' },
-  { value: 'ankle', label: 'Đau cổ chân' },
-  { value: 'neck', label: 'Đau cổ' },
-]
-const EQUIPMENT = [{ value: 'dumbbell', label: 'Tạ đơn' }]
 const DAYS = [2, 3, 4, 5, 6]
 const MINUTES = [15, 20, 30, 45, 60]
-const PERIODS = [
-  { value: 'any', label: 'Lúc nào cũng được' },
-  { value: 'morning', label: 'Sáng (6h - 12h)' },
-  { value: 'afternoon', label: 'Chiều (12h - 17h)' },
-  { value: 'evening', label: 'Tối (17h - 22h)' },
-]
 const SCREENING = [
   { id: 'chestPain', text: 'Bạn có bị đau tức ngực khi vận động hoặc khi nghỉ ngơi?' },
   { id: 'dizziness', text: 'Bạn có hay bị chóng mặt hoặc ngất xỉu?' },
@@ -40,7 +15,6 @@ const SCREENING = [
   { id: 'medical', text: 'Bạn có bệnh mãn tính hoặc đang dùng thuốc mà bác sĩ dặn cần hạn chế vận động?' },
 ]
 
-const labelOf = (list, value) => list.find((x) => x.value === value)?.label ?? value
 
 // ---------- Hàm hỗ trợ ----------
 function emptyForm() {

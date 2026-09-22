@@ -3,23 +3,13 @@ import { Link } from 'react-router-dom'
 import useLocalStorage from '../store/useLocalStorage.js'
 import TimerPanel from '../components/TimerPanel.jsx'
 import { unlockAudio } from '../components/sound.js'
-import exercises from '../data/exercises.sample.json'
+import exercises from '../data/exercises.js'
 import { evaluateAdaptation } from '../logic/adaptive.js'
+import { unsafeItems } from '../logic/today.js'
 import { startTimer, countDone, countSetsDone, describeItem, buildLog, logsForAdaptation } from '../logic/workout.js'
 import { toYmd, fmtDayMonth, parseYmd } from '../logic/dates.js'
+import { DAY_NAMES, PHASES, TIERS, FEEDBACK } from '../data/labels.js'
 
-const DAY_NAMES = ['Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7', 'Chủ nhật']
-const PHASES = [
-  ['warmup', 'Khởi động'],
-  ['main', 'Tập chính'],
-  ['cooldown', 'Thả lỏng'],
-]
-const TIERS = { mini: 'Buổi ngắn', short: 'Buổi vừa', full: 'Buổi đầy đủ' }
-const FEEDBACK = [
-  { value: 'too_easy', label: 'Quá dễ', desc: 'Mình còn thừa sức' },
-  { value: 'just_right', label: 'Vừa sức', desc: 'Đủ mệt, làm được hết' },
-  { value: 'too_hard', label: 'Quá khó', desc: 'Mình rất mệt hoặc không theo kịp' },
-]
 const EX = Object.fromEntries(exercises.map((e) => [e.id, e]))
 
 const primaryBtn = 'rounded-xl bg-green-500 px-5 py-3 font-semibold text-white hover:bg-green-600 disabled:cursor-not-allowed disabled:bg-gray-300'
@@ -66,7 +56,7 @@ function ExerciseDetails({ ex }) {
 }
 
 // ---------- Màn hình chọn buổi tập ----------
-function SessionPicker({ plan, logs, todayYmd, onStart }) {
+function SessionPicker({ plan, logs, todayYmd, injuries, onStart }) {
   if (!plan) {
     return (
       <div className="space-y-4">
@@ -82,15 +72,31 @@ function SessionPicker({ plan, logs, todayYmd, onStart }) {
   const today = todo.find((s) => s.date === todayYmd)
   const others = todo.filter((s) => s !== today)
 
-  const card = (s, highlight) => (
-    <li key={s.date} className={`flex items-center justify-between gap-3 rounded-2xl border p-4 ${highlight ? 'border-green-500 bg-green-50' : 'border-gray-200 bg-white'}`}>
-      <div>
-        <p className="font-bold">{sessionTitle(s)}{s.date < todayYmd ? ' (đã qua, tập bù được)' : ''}</p>
-        <p className="text-sm text-gray-600">{s.startTime} · {s.minutes} phút · {TIERS[s.session.tier]}</p>
-      </div>
-      <button type="button" onClick={() => onStart(s)} className={primaryBtn}>Bắt đầu</button>
-    </li>
-  )
+  // An toàn: hồ sơ có thể đã đổi (thêm chấn thương) SAU khi lịch này được tạo.
+  // Buổi có bài không còn phù hợp thì không cho bắt đầu, chỉ cho tạo lại lịch.
+  const card = (s, highlight) => {
+    const bad = unsafeItems(s, injuries, exercises)
+    return (
+      <li key={s.date} className={`rounded-2xl border p-4 ${highlight ? 'border-green-500 bg-green-50' : 'border-gray-200 bg-white'}`}>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="font-bold">{sessionTitle(s)}{s.date < todayYmd ? ' (đã qua, tập bù được)' : ''}</p>
+            <p className="text-sm text-gray-600">{s.startTime} · {s.minutes} phút · {TIERS[s.session.tier]}</p>
+          </div>
+          {bad.length === 0 && (
+            <button type="button" onClick={() => onStart(s)} className={primaryBtn}>Bắt đầu</button>
+          )}
+        </div>
+        {bad.length > 0 && (
+          <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+            <p className="font-semibold">Hồ sơ của bạn đã thay đổi, buổi này cần được cập nhật.</p>
+            <p className="mt-1">Có bài không còn phù hợp: {bad.join(', ')}.</p>
+            <Link to="/schedule" className="mt-2 inline-block font-semibold underline">Tạo lại lịch</Link>
+          </div>
+        )}
+      </li>
+    )
+  }
 
   return (
     <div className="space-y-5">
@@ -155,6 +161,7 @@ function DoneScreen({ result, onAnother }) {
 
 // ---------- Trang chính ----------
 export default function Workout() {
+  const [profile] = useLocalStorage('profile', null)
   const [plan] = useLocalStorage('weekPlan', null)
   const [logs, setLogs] = useLocalStorage('logs', [])
   const [adapt, setAdapt] = useLocalStorage('adaptState', { step: 0, lastAdjustedLogId: null })
@@ -182,8 +189,7 @@ export default function Workout() {
   }
 
   if (!active) {
-    return <SessionPicker plan={plan} logs={logs} todayYmd={todayYmd} onStart={startSession} />
-  }
+        return <SessionPicker plan={plan} logs={logs} todayYmd={todayYmd} injuries={profile?.injuries} onStart={startSession} />
 
   const s = active.session
   const items = s.session.items
