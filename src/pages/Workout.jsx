@@ -72,8 +72,6 @@ function SessionPicker({ plan, logs, todayYmd, injuries, onStart }) {
   const today = todo.find((s) => s.date === todayYmd)
   const others = todo.filter((s) => s !== today)
 
-  // An toàn: hồ sơ có thể đã đổi (thêm chấn thương) SAU khi lịch này được tạo.
-  // Buổi có bài không còn phù hợp thì không cho bắt đầu, chỉ cho tạo lại lịch.
   const card = (s, highlight) => {
     const bad = unsafeItems(s, injuries, exercises)
     return (
@@ -165,10 +163,10 @@ export default function Workout() {
   const [plan] = useLocalStorage('weekPlan', null)
   const [logs, setLogs] = useLocalStorage('logs', [])
   const [adapt, setAdapt] = useLocalStorage('adaptState', { step: 0, lastAdjustedLogId: null })
-  const [active, setActive] = useLocalStorage('activeWorkout', null) // buổi đang tập dở (giữ lại khi tải lại trang)
+  const [active, setActive] = useLocalStorage('activeWorkout', null)
   const [soundOn, setSoundOn] = useLocalStorage('soundOn', true)
   const [timer, setTimer] = useState(null)
-  const [stage, setStage] = useState('work') // 'work' | 'feedback' | 'done'
+  const [stage, setStage] = useState('work')
   const [feedback, setFeedback] = useState('')
   const [note, setNote] = useState('')
   const [result, setResult] = useState(null)
@@ -180,7 +178,6 @@ export default function Workout() {
   }
 
   function startSession(s) {
-    // Lưu bản sao của buổi tập: dù sau đó bạn tạo lại lịch, buổi đang tập vẫn giữ nguyên
     setActive({ date: s.date, startedAt: Date.now(), session: s, progress: {} })
     setTimer(null)
     setStage('work')
@@ -189,7 +186,8 @@ export default function Workout() {
   }
 
   if (!active) {
-        return <SessionPicker plan={plan} logs={logs} todayYmd={todayYmd} injuries={profile?.injuries} onStart={startSession} />
+    return <SessionPicker plan={plan} logs={logs} todayYmd={todayYmd} injuries={profile?.injuries} onStart={startSession} />
+  } // <-- ĐÃ THÊM DẤU } ĐÓNG KHỐI IF NÀY
 
   const s = active.session
   const items = s.session.items
@@ -233,7 +231,6 @@ export default function Workout() {
     if (timer && timer.exerciseId === item.exerciseId) setTimer(null)
   }
 
-  // Hết giờ đếm ngược tập → tự tính là xong hiệp đó và chuyển sang nghỉ
   function handleTimerEnd(t) {
     if (t.kind !== 'work') return
     const item = items.find((i) => i.exerciseId === t.exerciseId)
@@ -265,7 +262,6 @@ export default function Workout() {
     setStage('done')
   }
 
-  // ---------- Bước chấm điểm cảm nhận ----------
   if (stage === 'feedback') {
     return (
       <div className="mx-auto max-w-lg space-y-5">
@@ -304,7 +300,6 @@ export default function Workout() {
     )
   }
 
-  // ---------- Đang tập ----------
   return (
     <div className="space-y-4">
       <div>
