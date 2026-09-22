@@ -389,7 +389,7 @@ export default function Workout() {
         )
       })}
 
-      <div className="flex flex-wrap items-center gap-3 pt-2">
+    <div className="flex flex-wrap items-center gap-3 pt-2">
         <button type="button" onClick={() => setStage('feedback')} disabled={setsDone === 0} className={primaryBtn}>
           Kết thúc buổi tập
         </button>
