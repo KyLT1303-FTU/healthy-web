@@ -1,251 +1,401 @@
-import { Link, useNavigate } from 'react-router-dom'
+import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import useLocalStorage from '../store/useLocalStorage.js'
+import TimerPanel from '../components/TimerPanel.jsx'
+import { unlockAudio } from '../components/sound.js'
 import exercises from '../data/exercises.js'
-import { getTodayState, unsafeItems } from '../logic/today.js'
-import { computeStreaks } from '../logic/progress.js'
-import { toYmd, parseYmd, fmtDayMonth } from '../logic/dates.js'
-import { DAY_NAMES, TIERS } from '../data/labels.js'
+import { evaluateAdaptation } from '../logic/adaptive.js'
+import { unsafeItems } from '../logic/today.js'
+import { startTimer, countDone, countSetsDone, describeItem, buildLog, logsForAdaptation } from '../logic/workout.js'
+import { toYmd, fmtDayMonth, parseYmd } from '../logic/dates.js'
+import { DAY_NAMES, PHASES, TIERS, FEEDBACK } from '../data/labels.js'
 
-const card = 'rounded-2xl border border-gray-200 bg-white p-5'
-const primaryBtn = 'inline-block rounded-xl bg-green-500 px-5 py-3 text-center font-semibold text-white hover:bg-green-600'
-const ghostBtn = 'inline-block rounded-xl border border-gray-300 bg-white px-5 py-3 text-center text-gray-700 hover:bg-gray-100'
+const EX = Object.fromEntries(exercises.map((e) => [e.id, e]))
+
+const primaryBtn = 'rounded-xl bg-green-500 px-5 py-3 font-semibold text-white hover:bg-green-600 disabled:cursor-not-allowed disabled:bg-gray-300'
+const ghostBtn = 'rounded-xl border border-gray-300 bg-white px-5 py-3 text-gray-700 hover:bg-gray-100'
 
 const sessionTitle = (s) => `${DAY_NAMES[s.dayOfWeek - 1]} ${fmtDayMonth(parseYmd(s.date))}`
 
-function greeting(hour) {
-  if (hour < 11) return 'Chào buổi sáng'
-  if (hour < 14) return 'Chào buổi trưa'
-  if (hour < 18) return 'Chào buổi chiều'
-  return 'Chào buổi tối'
+function SafetyBanner() {
+  return (
+    <p className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+      Dừng ngay nếu bạn thấy đau nhói, chóng mặt, buồn nôn hoặc khó thở. Nội dung chỉ mang tính tham khảo.
+    </p>
+  )
 }
 
-function Welcome() {
+function ExerciseDetails({ ex }) {
+  const steps = ex?.steps ?? []
+  const mistakes = ex?.commonMistakes ?? []
+  const notes = ex?.safetyNotes ?? []
   return (
-    <div className="mx-auto max-w-lg space-y-6 py-4 text-center">
-      <div className="space-y-3">
-        <h1 className="text-3xl font-bold leading-tight">Lịch tập phù hợp với cơ thể và thời gian của bạn</h1>
-        <p className="text-gray-600">Trả lời vài câu hỏi, hệ thống sẽ xếp lịch tập vào những lúc bạn rảnh.</p>
+    <details className="mt-2 text-sm">
+      <summary className="cursor-pointer text-gray-600">Cách thực hiện và lưu ý an toàn</summary>
+      <div className="mt-2 space-y-2 text-gray-700">
+        {steps.length ? (
+          <ol className="list-decimal space-y-1 pl-5">
+            {steps.map((s, i) => <li key={i}>{s}</li>)}
+          </ol>
+        ) : (
+          <p className="text-gray-500">Chưa có hướng dẫn chi tiết cho bài này.</p>
+        )}
+        {mistakes.length > 0 && (
+          <div>
+            <p className="font-medium">Lỗi thường gặp</p>
+            <ul className="list-disc pl-5">{mistakes.map((s, i) => <li key={i}>{s}</li>)}</ul>
+          </div>
+        )}
+        <div className="rounded-lg border border-amber-300 bg-amber-50 p-2 text-amber-900">
+          {notes.map((s, i) => <p key={i}>{s}</p>)}
+          <p>Dừng lại nếu thấy đau nhói, chóng mặt hoặc khó thở.</p>
+        </div>
       </div>
-      <ul className="space-y-2 text-left">
-        {[
-          ['🎯', 'Gợi ý theo mục tiêu của bạn', 'Giảm cân, tăng cơ hoặc giãn cơ.'],
-          ['🛡️', 'Tránh bài tập có thể gây đau', 'Loại các bài không phù hợp với chấn thương của bạn.'],
-          ['📅', 'Xếp vào giờ rảnh của bạn', 'Bạn tô những lúc bận, phần còn lại để hệ thống lo.'],
-          ['📈', 'Tự điều chỉnh độ khó', 'Dễ quá thì tăng nhẹ, nặng quá thì giảm bớt.'],
-        ].map(([icon, title, desc]) => (
-          <li key={title} className="flex gap-3 rounded-xl bg-white p-3 shadow-sm">
-            <span className="text-2xl" aria-hidden="true">{icon}</span>
-            <span>
-              <span className="block font-semibold">{title}</span>
-              <span className="block text-sm text-gray-500">{desc}</span>
-            </span>
-          </li>
-        ))}
-      </ul>
-      <Link to="/onboarding" className={`${primaryBtn} w-full text-lg`}>Bắt đầu, mất khoảng 2 phút</Link>
-      <p className="text-xs text-gray-500">
-        Dữ liệu của bạn được lưu ngay trên thiết bị này. Nội dung chỉ mang tính tham khảo và không thay thế tư vấn y tế.
-      </p>
+    </details>
+  )
+}
+
+// ---------- Màn hình chọn buổi tập ----------
+function SessionPicker({ plan, logs, todayYmd, injuries, onStart }) {
+  if (!plan) {
+    return (
+      <div className="space-y-4">
+        <h1 className="text-2xl font-bold">Buổi tập</h1>
+        <p className="text-gray-600">Bạn chưa có lịch tập. Hãy tạo lịch tuần trước.</p>
+        <Link to="/schedule" className={`${primaryBtn} inline-block`}>Đến Lịch tuần</Link>
+      </div>
+    )
+  }
+  const todo = plan.sessions
+    .filter((s) => !logs.some((l) => l.sessionDate === s.date))
+    .sort((a, b) => a.date.localeCompare(b.date))
+  const today = todo.find((s) => s.date === todayYmd)
+  const others = todo.filter((s) => s !== today)
+
+  // An toàn: hồ sơ có thể đã đổi (thêm chấn thương) SAU khi lịch này được tạo.
+  // Buổi có bài không còn phù hợp thì không cho bắt đầu, chỉ cho tạo lại lịch.
+  const card = (s, highlight) => {
+    const bad = unsafeItems(s, injuries, exercises)
+    return (
+      <li key={s.date} className={`rounded-2xl border p-4 ${highlight ? 'border-green-500 bg-green-50' : 'border-gray-200 bg-white'}`}>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="font-bold">{sessionTitle(s)}{s.date < todayYmd ? ' (đã qua, tập bù được)' : ''}</p>
+            <p className="text-sm text-gray-600">{s.startTime} · {s.minutes} phút · {TIERS[s.session.tier]}</p>
+          </div>
+          {bad.length === 0 && (
+            <button type="button" onClick={() => onStart(s)} className={primaryBtn}>Bắt đầu</button>
+          )}
+        </div>
+        {bad.length > 0 && (
+          <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+            <p className="font-semibold">Hồ sơ của bạn đã thay đổi, buổi này cần được cập nhật.</p>
+            <p className="mt-1">Có bài không còn phù hợp: {bad.join(', ')}.</p>
+            <Link to="/schedule" className="mt-2 inline-block font-semibold underline">Tạo lại lịch</Link>
+          </div>
+        )}
+      </li>
+    )
+  }
+
+  return (
+    <div className="space-y-5">
+      <h1 className="text-2xl font-bold">Buổi tập</h1>
+      {today ? (
+        <section className="space-y-2">
+          <h2 className="text-sm font-semibold text-gray-500">Hôm nay</h2>
+          <ul>{card(today, true)}</ul>
+        </section>
+      ) : (
+        todo.length > 0 && <p className="text-gray-600">Hôm nay bạn không có buổi tập trong lịch.</p>
+      )}
+      {others.length > 0 && (
+        <section className="space-y-2">
+          <h2 className="text-sm font-semibold text-gray-500">Các buổi khác trong lịch</h2>
+          <ul className="space-y-2">{others.map((s) => card(s, false))}</ul>
+        </section>
+      )}
+      {todo.length === 0 && (
+        <p className="rounded-xl bg-green-50 p-4 text-green-800">Bạn đã hoàn thành hết các buổi trong lịch này. Tuyệt vời!</p>
+      )}
+      <Link to="/schedule" className="inline-block text-sm text-green-700 underline">Xem lịch tuần</Link>
     </div>
   )
 }
 
-function Step({ done, children }) {
+// ---------- Màn hình kết quả sau khi lưu ----------
+function DoneScreen({ result, onAnother }) {
+  const { log, adaptation } = result
+  const verdict = adaptation.delta > 0
+    ? 'Buổi sau sẽ tăng nhẹ độ khó'
+    : adaptation.delta < 0
+      ? 'Buổi sau sẽ giảm nhẹ độ khó'
+      : 'Giữ nguyên mức tập hiện tại'
   return (
-    <li className="flex items-center gap-3">
-      <span aria-hidden="true" className={`flex h-6 w-6 items-center justify-center rounded-full text-sm ${done ? 'bg-green-500 text-white' : 'border border-gray-300 text-gray-300'}`}>
-        {done ? '✓' : ''}
-      </span>
-      <span className={done ? 'text-gray-500 line-through' : 'font-medium'}>{children}</span>
-    </li>
-  )
-}
-
-function SessionPreview({ s }) {
-  const names = s.session.items.filter((i) => i.phase === 'main').map((i) => i.name)
-  const shown = names.slice(0, 4)
-  return (
-    <>
-      <p className="text-sm text-gray-600">
-        {s.startTime} · {s.minutes} phút · {TIERS[s.session.tier]} · {s.session.items.length} bài
-      </p>
-      {shown.length > 0 && (
-        <p className="mt-2 text-sm text-gray-500">
-          Gồm: {shown.join(', ')}{names.length > shown.length ? ` và ${names.length - shown.length} bài khác` : ''}
+    <div className="space-y-5">
+      <div className="rounded-2xl bg-green-500 p-5 text-white">
+        <p className="text-2xl font-bold">Hoàn thành buổi tập!</p>
+        <p className="mt-1">
+          {log.completedCount}/{log.total} bài · {log.actualMinutes} phút
         </p>
-      )}
-    </>
+      </div>
+      <div className="rounded-2xl border border-gray-200 bg-white p-4">
+        <p className="font-semibold">{verdict}</p>
+        <p className="mt-1 text-sm text-gray-600">{adaptation.reason}</p>
+        {adaptation.decision === 'hold' && adaptation.average === null && (
+          <p className="mt-1 text-sm text-gray-500">Hệ thống cần thêm vài buổi phản hồi để điều chỉnh chính xác hơn.</p>
+        )}
+        {adaptation.delta !== 0 && (
+          <p className="mt-2 text-sm text-gray-600">
+            Vào <b>Lịch tuần</b> và bấm &quot;Tạo lại lịch&quot; để áp dụng mức tải mới.
+          </p>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-3">
+        <Link to="/schedule" className={`${primaryBtn} inline-block`}>Về lịch tuần</Link>
+        <button type="button" onClick={onAnother} className={ghostBtn}>Tập buổi khác</button>
+      </div>
+    </div>
   )
 }
 
-export default function Home() {
-  const navigate = useNavigate()
+// ---------- Trang chính ----------
+export default function Workout() {
   const [profile] = useLocalStorage('profile', null)
-  const [busySlots] = useLocalStorage('busySlots', null)
   const [plan] = useLocalStorage('weekPlan', null)
-  const [logs] = useLocalStorage('logs', [])
-  const [active, setActive] = useLocalStorage('activeWorkout', null)
+  const [logs, setLogs] = useLocalStorage('logs', [])
+  const [adapt, setAdapt] = useLocalStorage('adaptState', { step: 0, lastAdjustedLogId: null })
+  const [active, setActive] = useLocalStorage('activeWorkout', null) // buổi đang tập dở (giữ lại khi tải lại trang)
+  const [soundOn, setSoundOn] = useLocalStorage('soundOn', true)
+  const [timer, setTimer] = useState(null)
+  const [stage, setStage] = useState('work') // 'work' | 'feedback' | 'done'
+  const [feedback, setFeedback] = useState('')
+  const [note, setNote] = useState('')
+  const [result, setResult] = useState(null)
 
-  const now = new Date()
-  const todayYmd = toYmd(now)
-  const state = getTodayState({ profile, busySlots, plan, logs, active, todayYmd })
+  const todayYmd = toYmd(new Date())
 
-  if (state.kind === 'welcome') return <Welcome />
+  if (stage === 'done' && result) {
+    return <DoneScreen result={result} onAnother={() => { setStage('work'); setResult(null) }} />
+  }
 
-  const goal = profile.daysPerWeek ?? 3
-  const stats = computeStreaks(logs, goal, todayYmd)
-  const weekPct = Math.min(100, Math.round((stats.thisWeek.count / stats.thisWeek.goal) * 100))
-
-  // Bắt đầu một chạm: ghi sẵn buổi đang tập (cùng định dạng với trang Tập) rồi chuyển sang trang Tập
-  function start(s) {
+  function startSession(s) {
+    // Lưu bản sao của buổi tập: dù sau đó bạn tạo lại lịch, buổi đang tập vẫn giữ nguyên
     setActive({ date: s.date, startedAt: Date.now(), session: s, progress: {} })
-    navigate('/workout')
+    setTimer(null)
+    setStage('work')
+    setFeedback('')
+    setNote('')
   }
 
-  const canStart = state.kind !== 'active' // đang tập dở thì không mở buổi khác đè lên
-  // Hồ sơ có thể đã đổi sau khi tạo lịch: không cho bắt đầu buổi có bài không còn phù hợp
-  const unsafe = (s) => (s ? unsafeItems(s, profile.injuries, exercises) : [])
-  const todayUnsafe = state.kind === 'today' ? unsafe(state.session) : []
-  const missedUnsafe = state.missed ? unsafe(state.missed) : []
+  if (!active) {
+    return <SessionPicker plan={plan} logs={logs} todayYmd={todayYmd} injuries={profile?.injuries} onStart={startSession} />
+  }
 
-  let main = null
-  if (state.kind === 'active') {
-    main = (
-      <section className={`${card} border-green-500 bg-green-50`}>
-        <p className="text-xs font-semibold uppercase tracking-wide text-green-700">Đang tập dở</p>
-        <h2 className="mt-1 text-xl font-bold">Buổi {sessionTitle(state.session)}</h2>
-        <SessionPreview s={state.session} />
-        <Link to="/workout" className={`${primaryBtn} mt-4 w-full`}>Tiếp tục buổi tập</Link>
-      </section>
-    )
-  } else if (state.kind === 'setup') {
-    const c = state.checklist
-    main = (
-      <section className={card}>
-        <h2 className="text-xl font-bold">{state.expired ? 'Lịch tập đã hết hạn' : 'Sắp xong rồi!'}</h2>
-        <p className="mt-1 text-sm text-gray-600">
-          {state.expired ? 'Hãy tạo lịch cho tuần này để tiếp tục.' : 'Thêm một bước nữa là bạn có lịch tập đầu tiên.'}
-        </p>
-        <ul className="mt-4 space-y-3">
-          <Step done>Tạo hồ sơ</Step>
-          <Step done={c.hasBusy}>Khai báo giờ bận (nên làm để lịch chính xác)</Step>
-          <Step done={c.hasPlan}>Tạo lịch tuần</Step>
-          <Step done={c.hasLogs}>Tập buổi đầu tiên</Step>
-        </ul>
-        <div className="mt-5 flex flex-wrap gap-3">
-          <Link to="/schedule" className={primaryBtn}>{c.hasBusy ? 'Tạo lịch tuần' : 'Khai báo giờ bận và tạo lịch'}</Link>
+  const s = active.session
+  const items = s.session.items
+  const progress = active.progress
+  const doneCount = countDone(items, progress)
+  const setsDone = countSetsDone(progress)
+  const percent = items.length ? Math.round((doneCount / items.length) * 100) : 0
+
+  const setSets = (id, n) => setActive({ ...active, progress: { ...progress, [id]: n } })
+
+  function startRest(item, doneSets) {
+    setTimer(startTimer(Date.now(), item.restSec, {
+      kind: 'rest',
+      exerciseId: item.exerciseId,
+      label: `Nghỉ sau hiệp ${doneSets}/${item.sets}: ${item.name}`,
+    }))
+  }
+
+  function completeSet(item) {
+    const done = progress[item.exerciseId] ?? 0
+    if (done >= item.sets) return
+    unlockAudio()
+    setSets(item.exerciseId, done + 1)
+    if (done + 1 < item.sets) startRest(item, done + 1)
+    else setTimer(null)
+  }
+
+  function startWork(item) {
+    const done = progress[item.exerciseId] ?? 0
+    unlockAudio()
+    setTimer(startTimer(Date.now(), item.durationSec, {
+      kind: 'work',
+      exerciseId: item.exerciseId,
+      label: `${item.name}: hiệp ${done + 1}/${item.sets}`,
+    }))
+  }
+
+  function toggleItem(item) {
+    const isDone = (progress[item.exerciseId] ?? 0) >= item.sets
+    setSets(item.exerciseId, isDone ? 0 : item.sets)
+    if (timer && timer.exerciseId === item.exerciseId) setTimer(null)
+  }
+
+  // Hết giờ đếm ngược tập → tự tính là xong hiệp đó và chuyển sang nghỉ
+  function handleTimerEnd(t) {
+    if (t.kind !== 'work') return
+    const item = items.find((i) => i.exerciseId === t.exerciseId)
+    if (item) completeSet(item)
+  }
+
+  function skipTimer(t) {
+    if (t.kind === 'work') handleTimerEnd(t)
+    else setTimer(null)
+  }
+
+  function cancelWorkout() {
+    if (window.confirm('Huỷ buổi tập đang làm dở? Tiến độ sẽ không được lưu.')) {
+      setActive(null)
+      setTimer(null)
+    }
+  }
+
+  function saveWorkout() {
+    const nowMs = Date.now()
+    const log = buildLog({ session: s, progress, feedback, note, startedAtMs: active.startedAt, nowMs })
+    const newLogs = [...logs, log]
+    const adaptation = evaluateAdaptation(logsForAdaptation(newLogs), adapt)
+    setLogs(newLogs)
+    setAdapt(adaptation.state)
+    setActive(null)
+    setTimer(null)
+    setResult({ log, adaptation })
+    setStage('done')
+  }
+
+  // ---------- Bước chấm điểm cảm nhận ----------
+  if (stage === 'feedback') {
+    return (
+      <div className="mx-auto max-w-lg space-y-5">
+        <h1 className="text-2xl font-bold">Buổi tập vừa rồi thế nào?</h1>
+        <p className="text-sm text-gray-600">Bạn xong {doneCount}/{items.length} bài. Đánh giá thật lòng để hệ thống chọn mức tập phù hợp cho bạn.</p>
+        <div className="grid gap-2">
+          {FEEDBACK.map((f) => (
+            <button
+              key={f.value}
+              type="button"
+              aria-pressed={feedback === f.value}
+              onClick={() => setFeedback(f.value)}
+              className={`rounded-xl border px-4 py-3 text-left ${feedback === f.value ? 'border-green-500 bg-green-50 font-semibold text-green-700' : 'border-gray-200 bg-white'}`}
+            >
+              <span className="block">{f.label}</span>
+              <span className="block text-xs font-normal text-gray-500">{f.desc}</span>
+            </button>
+          ))}
         </div>
-      </section>
-    )
-  } else if (state.kind === 'today') {
-    main = (
-      <section className={`${card} border-green-500 bg-green-50`}>
-        <p className="text-xs font-semibold uppercase tracking-wide text-green-700">Hôm nay</p>
-        <h2 className="mt-1 text-xl font-bold">Đến giờ tập rồi!</h2>
-        <SessionPreview s={state.session} />
-        {todayUnsafe.length > 0 ? (
-          <>
-            <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-              <p className="font-semibold">Hồ sơ của bạn đã thay đổi, lịch này cần được cập nhật.</p>
-              <p className="mt-1">Buổi này có bài không còn phù hợp: {todayUnsafe.join(', ')}.</p>
-            </div>
-            <Link to="/schedule" className={`${primaryBtn} mt-4 w-full`}>Tạo lại lịch</Link>
-          </>
-        ) : (
-          <button type="button" onClick={() => start(state.session)} className={`${primaryBtn} mt-4 w-full`}>
-            Bắt đầu buổi tập
-          </button>
-        )}
-      </section>
-    )
-  } else if (state.kind === 'done') {
-    main = (
-      <section className={`${card} border-green-300 bg-green-50`}>
-        <h2 className="text-xl font-bold">Hôm nay bạn đã tập xong! 🎉</h2>
-        <p className="mt-1 text-sm text-gray-600">Hãy nghỉ ngơi, uống nước và ăn uống đủ chất.</p>
-      </section>
-    )
-  } else {
-    main = (
-      <section className={card}>
-        <h2 className="text-xl font-bold">Hôm nay là ngày nghỉ</h2>
-        <p className="mt-1 text-sm text-gray-600">
-          {state.planStartsLater
-            ? `Lịch tập của bạn bắt đầu từ ${sessionTitle(state.next)}.`
-            : 'Nghỉ ngơi cũng là một phần của tập luyện.'}
-        </p>
-        {!state.next && (
-          <div className="mt-3 space-y-2">
-            <p className="text-sm text-gray-600">Bạn đã tập hết các buổi trong lịch này.</p>
-            <Link to="/schedule" className={ghostBtn}>Tạo lịch cho tuần sau</Link>
-          </div>
-        )}
-      </section>
+        <div>
+          <label htmlFor="note" className="mb-1 block text-sm font-medium text-gray-700">Ghi chú (không bắt buộc)</label>
+          <textarea
+            id="note"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            rows={3}
+            placeholder="VD: hơi mỏi vai, tập xong thấy khoẻ"
+            className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-200"
+          />
+        </div>
+        <div className="flex gap-3">
+          <button type="button" onClick={() => setStage('work')} className={ghostBtn}>Quay lại</button>
+          <button type="button" onClick={saveWorkout} disabled={!feedback} className={`${primaryBtn} flex-1`}>Lưu buổi tập</button>
+        </div>
+      </div>
     )
   }
 
-  const showNext = (state.kind === 'today' || state.kind === 'done' || state.kind === 'rest') && state.next && !state.planStartsLater
-
+  // ---------- Đang tập ----------
   return (
-    <div className="mx-auto max-w-lg space-y-4">
-      <header>
-        <p className="text-sm text-gray-500">{DAY_NAMES[(now.getDay() + 6) % 7]}, {fmtDayMonth(now)}/{now.getFullYear()}</p>
-        <h1 className="text-2xl font-bold">{greeting(now.getHours())}!</h1>
-      </header>
+    <div className="space-y-4">
+      <div>
+        <h1 className="text-2xl font-bold">Buổi tập</h1>
+        <p className="text-sm text-gray-600">
+          {sessionTitle(s)} · {s.minutes} phút · {TIERS[s.session.tier]}
+        </p>
+      </div>
 
-      {state.needsDoctorCheck && (
-        <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-          Bạn đã trả lời &quot;Có&quot; ở phần sàng lọc sức khoẻ. Hãy hỏi ý kiến bác sĩ trước khi tập.
+      <SafetyBanner />
+
+      <TimerPanel timer={timer} soundOn={soundOn} onChange={setTimer} onFinish={handleTimerEnd} onSkip={skipTimer} />
+
+      <div>
+        <div className="mb-1 flex justify-between text-sm text-gray-600">
+          <span>Tiến độ</span>
+          <span>{doneCount}/{items.length} bài</span>
         </div>
-      )}
-
-      {state.daysSinceLast !== null && state.daysSinceLast >= 7 && state.kind !== 'active' && (
-        <div className="rounded-xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
-          Chào mừng bạn quay lại! Đã {state.daysSinceLast} ngày kể từ buổi tập gần nhất. Hãy bắt đầu nhẹ nhàng
-          và nghe theo cơ thể mình nhé.
+        <div className="h-3 rounded-full bg-gray-200">
+          <div className="h-3 rounded-full bg-green-500 transition-all" style={{ width: `${percent}%` }} role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100} />
         </div>
-      )}
+      </div>
 
-      {main}
+      <label className="flex items-center gap-2 text-sm text-gray-600">
+        <input type="checkbox" checked={soundOn} onChange={(e) => setSoundOn(e.target.checked)} />
+        Âm báo khi hết giờ
+      </label>
 
-      {canStart && state.missed && state.kind !== 'setup' && (
-        <section className={`${card} flex items-center justify-between gap-3`}>
-          <div>
-            <p className="font-semibold">Buổi {sessionTitle(state.missed)} chưa tập</p>
-            <p className="text-sm text-gray-500">
-              {missedUnsafe.length > 0 ? 'Hồ sơ đã thay đổi nên buổi này cần được tạo lại.' : 'Muốn tập bù hôm nay không?'}
-            </p>
-          </div>
-          {missedUnsafe.length > 0 ? (
-            <Link to="/schedule" className={ghostBtn}>Tạo lại lịch</Link>
-          ) : (
-            <button type="button" onClick={() => start(state.missed)} className={ghostBtn}>Tập bù</button>
-          )}
-        </section>
-      )}
+      {PHASES.map(([phase, title]) => {
+        const list = items.filter((i) => i.phase === phase)
+        if (!list.length) return null
+        return (
+          <section key={phase} className="space-y-2">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-400">{title}</h2>
+            <ol className="space-y-2">
+              {list.map((item) => {
+                const ex = EX[item.exerciseId]
+                const done = progress[item.exerciseId] ?? 0
+                const finished = done >= item.sets
+                const running = timer && timer.kind === 'work' && timer.exerciseId === item.exerciseId
+                return (
+                  <li key={item.exerciseId} className={`rounded-2xl border p-4 ${finished ? 'border-green-300 bg-green-50' : 'border-gray-200 bg-white'}`}>
+                    <div className="flex items-start gap-3">
+                      <input
+                        type="checkbox"
+                        checked={finished}
+                        onChange={() => toggleItem(item)}
+                        aria-label={`Hoàn thành ${item.name}`}
+                        className="mt-1 h-5 w-5 accent-green-500"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className={`font-semibold ${finished ? 'text-green-700 line-through' : ''}`}>{item.name}</p>
+                        <p className="text-sm text-gray-500">{describeItem(item)}</p>
+                        <p className="text-xs text-gray-500">Hiệp {done}/{item.sets}</p>
+                        {!finished && (
+                          item.durationSec != null ? (
+                            <button type="button" disabled={running} onClick={() => startWork(item)} className="mt-2 rounded-lg bg-green-500 px-3 py-2 text-sm font-semibold text-white hover:bg-green-600 disabled:bg-gray-300">
+                              Bắt đầu hiệp {done + 1} ({item.durationSec} giây)
+                            </button>
+                          ) : (
+                            <button type="button" onClick={() => completeSet(item)} className="mt-2 rounded-lg bg-green-500 px-3 py-2 text-sm font-semibold text-white hover:bg-green-600">
+                              Xong hiệp {done + 1}
+                            </button>
+                          )
+                        )}
+                        <ExerciseDetails ex={ex} />
+                      </div>
+                      {ex?.image ? (
+                        <img src={ex.image} alt="" loading="lazy" className="h-16 w-16 rounded-lg object-cover" />
+                      ) : (
+                        <div aria-hidden="true" className="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-2xl font-bold text-gray-300">
+                          {item.name[0]}
+                        </div>
+                      )}
+                    </div>
+                  </li>
+                )
+              })}
+            </ol>
+          </section>
+        )
+      })}
 
-      {showNext && (
-        <section className={card}>
-          <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Buổi tiếp theo</p>
-          <p className="mt-1 font-bold">{sessionTitle(state.next)}</p>
-          <SessionPreview s={state.next} />
-        </section>
-      )}
-
-      {/* Tiến độ tuần */}
-      <section className={card}>
-        <div className="flex items-baseline justify-between">
-          <h2 className="font-bold">Tuần này</h2>
-          <span className="text-sm text-gray-600">{stats.thisWeek.count}/{stats.thisWeek.goal} buổi</span>
-        </div>
-        <div className="mt-2 h-3 rounded-full bg-gray-200">
-          <div className="h-3 rounded-full bg-green-500 transition-all" style={{ width: `${weekPct}%` }} role="progressbar" aria-valuenow={weekPct} aria-valuemin={0} aria-valuemax={100} aria-label="Tiến độ tuần này" />
-        </div>
-        <div className="mt-3 flex items-center justify-between text-sm">
-          <span className="text-gray-600">Chuỗi hiện tại: <b>{stats.current} tuần</b></span>
-          <Link to="/progress" className="text-green-700 underline">Xem tiến độ</Link>
-        </div>
-      </section>
+      <div className="flex flex-wrap items-center gap-3 pt-2">
+        <button type="button" onClick={() => setStage('feedback')} disabled={setsDone === 0} className={primaryBtn}>
+          Kết thúc buổi tập
+        </button>
+        <button type="button" onClick={cancelWorkout} className={ghostBtn}>Huỷ buổi tập</button>
+        {setsDone === 0 && <span className="text-sm text-gray-500">Hãy hoàn thành ít nhất một hiệp để kết thúc.</span>}
+      </div>
     </div>
   )
 }

@@ -1,1 +1,76 @@
 @import "tailwindcss";
+
+/* ============================================================
+   BỘ KHUNG THIẾT KẾ DÙNG CHUNG (design tokens)
+   Đổi màu/kiểu chữ của toàn bộ web thì chỉ sửa ở đây.
+   ============================================================ */
+@theme {
+  /* Xanh lá — màu chủ đạo. brand-500 là màu chính hiện đang dùng. */
+  --color-brand-50: #f0fdf4;
+  --color-brand-100: #dcfce7;
+  --color-brand-200: #bbf7d0;
+  --color-brand-300: #86efac;
+  --color-brand-400: #4ade80;
+  --color-brand-500: #22c55e;
+  --color-brand-600: #16a34a;
+  --color-brand-700: #15803d;
+  --color-brand-800: #166534;
+  --color-brand-900: #14532d;
+
+  /* Vàng ấm — dùng cho huy hiệu, thành tích, điểm nhấn "ăn mừng" */
+  --color-accent-50: #fffbeb;
+  --color-accent-100: #fef3c7;
+  --color-accent-300: #fcd34d;
+  --color-accent-500: #f59e0b;
+  --color-accent-600: #d97706;
+
+  /* Xanh dương nhạt — dùng cho thông tin trung tính, không phải cảnh báo */
+  --color-info-50: #f0f9ff;
+  --color-info-100: #e0f2fe;
+  --color-info-500: #0ea5e9;
+  --color-info-700: #0369a1;
+
+  --font-sans: "Be Vietnam Pro", ui-sans-serif, system-ui, sans-serif;
+}
+
+@layer base {
+  body {
+    font-family: var(--font-sans);
+  }
+}
+
+/* Nền có lớp, không phẳng: dải xanh lá rất nhạt ở trên, mờ dần xuống trắng */
+.bg-app {
+  background:
+    radial-gradient(ellipse 80% 50% at 50% -10%, var(--color-brand-100), transparent),
+    #fafaf9;
+}
+
+/* Thẻ nổi nhẹ, bo góc lớn, thay cho border phẳng đơn điệu */
+.card-soft {
+  background: white;
+  border-radius: 1.5rem;
+  box-shadow: 0 1px 2px rgba(20, 83, 45, 0.04), 0 8px 24px -8px rgba(20, 83, 45, 0.1);
+}
+
+/* Hình khối trang trí mờ phía sau nội dung (blob) */
+.decor-blob {
+  position: absolute;
+  border-radius: 999px;
+  filter: blur(40px);
+  opacity: 0.5;
+  pointer-events: none;
+  z-index: 0;
+}
+
+@keyframes pop-in {
+  from { opacity: 0; transform: scale(0.92) translateY(6px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+.animate-pop { animation: pop-in 0.35s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+@keyframes badge-bounce {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+}
+.animate-badge { animation: badge-bounce 0.5s ease-in-out; }
